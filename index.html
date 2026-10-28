@@ -1,0 +1,202 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ChargeTime Pro</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 20px;
+  font-family: Arial, sans-serif;
+  background: linear-gradient(135deg,#101827,#174b57);
+  color: white; min-height: 100vh;
+}
+.card {
+  max-width: 430px; margin: 20px auto; padding: 24px;
+  background: #1d293b; border-radius: 22px;
+}
+h1 { text-align: center; color: #65f2c2; }
+.subtitle { text-align: center; color: #cbd5e1; }
+label { display: block; margin: 22px 0 8px; }
+input {
+  width: 100%; padding: 14px; font-size: 18px;
+  border: 2px solid #536579; border-radius: 10px;
+}
+button {
+  width: 100%; padding: 14px; margin-top: 12px;
+  border: 0; border-radius: 10px; font-size: 16px;
+  font-weight: bold;
+}
+.calculate { background: #65f2c2; }
+.remind { background: #4ea5ff; color: white; }
+.cancel { background: #465366; color: white; }
+.result {
+  margin-top: 22px; padding: 18px;
+  background: #101827; border-radius: 14px; text-align: center;
+}
+.small { color: #cbd5e1; line-height: 1.6; }
+.big { font-size: 27px; font-weight: bold; color: #65f2c2; margin: 12px 0; }
+#message { margin-top: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.warning { color: #ffd166; }
+footer { color: #aebdcc; font-size: 12px; line-height: 1.5; margin-top: 20px; }
+</style>
+</head>
+<body>
+<div class="card">
+<h1>ChargeTime Pro</h1>
+<p class="subtitle">Your charging time estimator</p>
+
+<label for="battery">Current battery percentage (%)</label>
+<input id="battery" type="number" min="0" max="100" step="1"
+       inputmode="numeric" placeholder="Enter 0 to 100">
+
+<button class="calculate" onclick="calculateTime()">Calculate Charging Time</button>
+
+<div class="result">
+<div class="small">Estimated time remaining</div>
+<div class="big" id="estimate">--</div>
+<div class="small">Expected to reach 100% at</div>
+<div class="big" id="finish">--:--</div>
+<div class="small">Countdown</div>
+<div class="big" id="countdown">--:--:--</div>
+</div>
+
+<button class="remind" onclick="startReminder()">Start Reminder</button>
+<button class="cancel" onclick="cancelReminder()">Cancel Reminder</button>
+
+<div id="message" role="status" aria-live="polite">
+Enter your battery percentage to begin.
+</div>
+
+<footer>
+Charging time is only an estimate. Actual speed changes with temperature,
+charger and battery level. Keep this page open for the countdown and
+reminder; notifications may not work if the browser is closed.
+</footer>
+</div>
+
+<script>
+let finishAt = null;
+let interval = null;
+let reminderActive = false;
+
+function estimateMinutes(p) {
+  if (p >= 100) return 0;
+  if (p < 50) return Math.ceil((50 - p) * 0.60 + 35);
+  return Math.ceil((100 - p) * 0.70);
+}
+
+function calculateTime() {
+  clearInterval(interval);
+  reminderActive = false;
+
+  const raw = document.getElementById("battery").value.trim();
+  const p = Number(raw);
+  const msg = document.getElementById("message");
+
+  document.getElementById("estimate").textContent = "--";
+  document.getElementById("finish").textContent = "--:--";
+  document.getElementById("countdown").textContent = "--:--:--";
+  finishAt = null;
+
+  if (raw === "" || !Number.isFinite(p) ||
+      p < 0 || p > 100 || !Number.isInteger(p)) {
+    msg.className = "warning";
+    msg.textContent = "Invalid percentage! Enter a whole number from 0 to 100.";
+    return;
+  }
+
+  if (p === 100) {
+    document.getElementById("estimate").textContent = "0 minutes";
+    document.getElementById("finish").textContent = "Already full";
+    document.getElementById("countdown").textContent = "00:00:00";
+    msg.className = "";
+    msg.textContent = "Your battery is already at 100%.";
+    return;
+  }
+
+  const mins = estimateMinutes(p);
+  finishAt = Date.now() + mins * 60000;
+  document.getElementById("estimate").textContent = mins + " minutes";
+  document.getElementById("finish").textContent =
+    new Date(finishAt).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit"});
+  msg.className = "";
+  msg.textContent = "Estimate ready. Tap Start Reminder to start the countdown.";
+}
+
+function tick() {
+  if (!finishAt) return;
+  const left = Math.max(0, Math.ceil((finishAt - Date.now()) / 1000));
+  const h = Math.floor(left / 3600);
+  const m = Math.floor((left % 3600) / 60);
+  const s = left % 60;
+  document.getElementById("countdown").textContent =
+    String(h).padStart(2,"0") + ":" +
+    String(m).padStart(2,"0") + ":" + String(s).padStart(2,"0");
+
+  if (left === 0 && reminderActive) {
+    reminderActive = false;
+    clearInterval(interval);
+    document.getElementById("message").textContent =
+      "Estimated charging time is over. Check your phone's battery.";
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification("ChargeTime Pro", {
+          body: "Your estimated charging time is over. Check your battery."
+        });
+      } catch (e) {
+        alert("ChargeTime Pro: Estimated charging time is over!");
+      }
+    } else {
+      alert("ChargeTime Pro: Estimated charging time is over!");
+    }
+  }
+}
+
+async function startReminder() {
+  const msg = document.getElementById("message");
+  if (!finishAt || finishAt <= Date.now()) {
+    msg.className = "warning";
+    msg.textContent = "First enter a valid percentage below 100 and tap Calculate.";
+    return;
+  }
+
+  if (!("Notification" in window)) {
+    msg.className = "warning";
+    msg.textContent = "Notifications are unavailable here. The countdown works while this page stays open.";
+    return;
+  }
+
+  try {
+    if (Notification.permission === "default") {
+      await Notification.requestPermission();
+    }
+    if (Notification.permission !== "granted") {
+      msg.className = "warning";
+      msg.textContent = "Notifications are blocked. The countdown works while this page stays open.";
+      return;
+    }
+    reminderActive = true;
+    clearInterval(interval);
+    interval = setInterval(tick, 1000);
+    tick();
+    msg.className = "";
+    msg.textContent = "Reminder started. Keep this page open; background delivery is not guaranteed.";
+  } catch (e) {
+    msg.className = "warning";
+    msg.textContent = "This browser preview cannot use notifications. Keep the page open for the countdown.";
+  }
+}
+
+function cancelReminder() {
+  reminderActive = false;
+  clearInterval(interval);
+  msg = document.getElementById("message");
+  msg.className = "";
+  msg.textContent = "Reminder cancelled.";
+}
+</script>
+</body>
+</html>
